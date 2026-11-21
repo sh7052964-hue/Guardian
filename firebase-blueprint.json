@@ -1,0 +1,286 @@
+{
+  "entities": {
+    "UserAccount": {
+      "title": "UserAccount",
+      "description": "Authenticated Parent or Child user profile in Guardian360",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["PARENT", "CHILD", "UNSET"] },
+        "familyId": { "type": "string" },
+        "mobileNumber": { "type": "string" },
+        "dateOfBirth": { "type": "string" },
+        "username": { "type": "string" },
+        "deviceName": { "type": "string" },
+        "avatarUri": { "type": "string" },
+        "pinHash": { "type": "string" },
+        "biometricEnabled": { "type": "boolean" },
+        "twoFactorEnabled": { "type": "boolean" },
+        "sessionVersion": { "type": "integer" },
+        "languageCode": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "displayName", "role", "sessionVersion", "createdAt", "updatedAt"]
+    },
+    "Family": {
+      "title": "Family",
+      "description": "Family supervision group managed by a Parent owner",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string" },
+        "familyName": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "childUids": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerUid", "familyName", "memberUids", "childUids", "createdAt", "updatedAt"]
+    },
+    "PairingSession": {
+      "title": "PairingSession",
+      "description": "One-time expiring Parent-Child device pairing session",
+      "type": "object",
+      "properties": {
+        "familyId": { "type": "string" },
+        "parentUid": { "type": "string" },
+        "pairingCode": { "type": "string" },
+        "status": { "type": "string", "enum": ["PENDING", "REQUESTED", "APPROVED", "REJECTED", "EXPIRED"] },
+        "childUid": { "type": "string" },
+        "childName": { "type": "string" },
+        "childDeviceName": { "type": "string" },
+        "deviceModel": { "type": "string" },
+        "expiresAtEpochMs": { "type": "integer" },
+        "attemptCount": { "type": "integer" },
+        "consumed": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["familyId", "parentUid", "pairingCode", "status", "expiresAtEpochMs", "attemptCount", "consumed", "createdAt", "updatedAt"]
+    },
+    "SupervisedDevice": {
+      "title": "SupervisedDevice",
+      "description": "Enrolled child device telemetry, management status, and profile",
+      "type": "object",
+      "properties": {
+        "parentUid": { "type": "string" },
+        "childUid": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "childName": { "type": "string" },
+        "childEmail": { "type": "string" },
+        "dateOfBirth": { "type": "string" },
+        "deviceName": { "type": "string" },
+        "deviceModel": { "type": "string" },
+        "managementLevel": { "type": "string" },
+        "supervisionStatus": { "type": "string" },
+        "deviceOnline": { "type": "boolean" },
+        "batteryLevel": { "type": "integer" },
+        "lastSeenEpochMs": { "type": "integer" },
+        "lastPolicySyncEpochMs": { "type": "integer" },
+        "dailyScreenTimeMinutes": { "type": "integer" },
+        "weeklyScreenTimeMinutes": { "type": "integer" },
+        "deviceLocked": { "type": "boolean" },
+        "strictSupervision": { "type": "boolean" },
+        "policyVersion": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["parentUid", "childUid", "memberUids", "childName", "deviceName", "managementLevel", "supervisionStatus", "deviceOnline", "batteryLevel", "deviceLocked", "strictSupervision", "policyVersion", "createdAt", "updatedAt"]
+    },
+    "SupervisionPolicy": {
+      "title": "SupervisionPolicy",
+      "description": "Parent-configured device, screen time, category, YouTube, WhatsApp, DNS, Play, and location policies",
+      "type": "object",
+      "properties": {
+        "parentUid": { "type": "string" },
+        "childUid": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "policyVersion": { "type": "integer" },
+        "dailyLimitMinutes": { "type": "integer" },
+        "bedtimeStart": { "type": "string" },
+        "bedtimeEnd": { "type": "string" },
+        "schoolTimeStart": { "type": "string" },
+        "schoolTimeEnd": { "type": "string" },
+        "downtimeEnabled": { "type": "boolean" },
+        "emergencyBypassEnabled": { "type": "boolean" },
+        "bonusMinutesToday": { "type": "integer" },
+        "maxAgeRating": { "type": "string" },
+        "youtubeMode": { "type": "string" },
+        "youtubeDailyLimitMinutes": { "type": "integer" },
+        "whatsappDailyLimitMinutes": { "type": "integer" },
+        "whatsappMetaAiWebRestricted": { "type": "boolean" },
+        "safeSearchEnabled": { "type": "boolean" },
+        "explicitContentFilterEnabled": { "type": "boolean" },
+        "dnsFilteringEnabled": { "type": "boolean" },
+        "playStoreApprovalRequired": { "type": "boolean" },
+        "iapRestricted": { "type": "boolean" },
+        "paidAppsRestricted": { "type": "boolean" },
+        "unknownSourcesBlocked": { "type": "boolean" },
+        "uninstallBlocked": { "type": "boolean" },
+        "usbDebuggingBlocked": { "type": "boolean" },
+        "blockedCategories": { "type": "array" },
+        "blockedPackages": { "type": "array" },
+        "allowedPackages": { "type": "array" },
+        "blockedDomains": { "type": "array" },
+        "allowedDomains": { "type": "array" },
+        "homeLat": { "type": "number" },
+        "homeLng": { "type": "number" },
+        "homeRadiusMeters": { "type": "integer" },
+        "schoolLat": { "type": "number" },
+        "schoolLng": { "type": "number" },
+        "schoolRadiusMeters": { "type": "integer" },
+        "locationSharingEnabled": { "type": "boolean" },
+        "retentionDays": { "type": "integer" },
+        "lastActionState": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["parentUid", "childUid", "memberUids", "policyVersion", "dailyLimitMinutes", "maxAgeRating", "youtubeMode", "lastActionState", "createdAt", "updatedAt"]
+    },
+    "ApprovalRequest": {
+      "title": "ApprovalRequest",
+      "description": "Child permission, extra time, app install, or website access approval request",
+      "type": "object",
+      "properties": {
+        "parentUid": { "type": "string" },
+        "childUid": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "childName": { "type": "string" },
+        "requestType": { "type": "string" },
+        "targetPackage": { "type": "string" },
+        "targetLabel": { "type": "string" },
+        "targetDomain": { "type": "string" },
+        "requestedMinutes": { "type": "integer" },
+        "reason": { "type": "string" },
+        "status": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED", "EXPIRED"] },
+        "expiresAtEpochMs": { "type": "integer" },
+        "decidedByUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["parentUid", "childUid", "memberUids", "childName", "requestType", "status", "createdAt", "updatedAt"]
+    },
+    "SecurityEvent": {
+      "title": "SecurityEvent",
+      "description": "Device security, tamper, permission change, and policy audit event",
+      "type": "object",
+      "properties": {
+        "parentUid": { "type": "string" },
+        "childUid": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "eventType": { "type": "string" },
+        "severity": { "type": "string" },
+        "title": { "type": "string" },
+        "details": { "type": "string" },
+        "packageName": { "type": "string" },
+        "acknowledged": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["parentUid", "childUid", "memberUids", "eventType", "severity", "title", "acknowledged", "createdAt", "updatedAt"]
+    },
+    "FamilyNotification": {
+      "title": "FamilyNotification",
+      "description": "Real-time notification record for Guardian360 events",
+      "type": "object",
+      "properties": {
+        "parentUid": { "type": "string" },
+        "childUid": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "recipientUid": { "type": "string" },
+        "category": { "type": "string" },
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "readFlag": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["parentUid", "childUid", "memberUids", "recipientUid", "category", "title", "body", "readFlag", "createdAt", "updatedAt"]
+    },
+    "LocationUpdate": {
+      "title": "LocationUpdate",
+      "description": "Explicitly shared location snapshot or Family Place arrival/departure event",
+      "type": "object",
+      "properties": {
+        "parentUid": { "type": "string" },
+        "childUid": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "accuracyMeters": { "type": "number" },
+        "placeLabel": { "type": "string" },
+        "eventKind": { "type": "string" },
+        "sharingActive": { "type": "boolean" },
+        "capturedAtEpochMs": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["parentUid", "childUid", "memberUids", "latitude", "longitude", "sharingActive", "capturedAtEpochMs", "createdAt", "updatedAt"]
+    },
+    "AppUsageEntry": {
+      "title": "AppUsageEntry",
+      "description": "Real UsageStatsManager daily and weekly usage entry per app",
+      "type": "object",
+      "properties": {
+        "parentUid": { "type": "string" },
+        "childUid": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "packageName": { "type": "string" },
+        "appLabel": { "type": "string" },
+        "category": { "type": "string" },
+        "ageRating": { "type": "string" },
+        "minutesToday": { "type": "integer" },
+        "minutesWeek": { "type": "integer" },
+        "blocked": { "type": "boolean" },
+        "exceptionAllowed": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["parentUid", "childUid", "memberUids", "packageName", "appLabel", "category", "minutesToday", "minutesWeek", "blocked", "exceptionAllowed", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserAccount" },
+      "description": "Per-user Guardian360 account profile"
+    },
+    "/families/{familyId}": {
+      "schema": { "$ref": "#/entities/Family" },
+      "description": "Family supervision group"
+    },
+    "/pairing_sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/PairingSession" },
+      "description": "One-time Parent-Child pairing sessions"
+    },
+    "/families/{familyId}/devices/{deviceId}": {
+      "schema": { "$ref": "#/entities/SupervisedDevice" },
+      "description": "Supervised child devices under a family"
+    },
+    "/families/{familyId}/policies/{childUid}": {
+      "schema": { "$ref": "#/entities/SupervisionPolicy" },
+      "description": "Supervision policy per child"
+    },
+    "/families/{familyId}/approvals/{requestId}": {
+      "schema": { "$ref": "#/entities/ApprovalRequest" },
+      "description": "Permission and screen time approval requests"
+    },
+    "/families/{familyId}/security_events/{eventId}": {
+      "schema": { "$ref": "#/entities/SecurityEvent" },
+      "description": "Security and tamper event logs"
+    },
+    "/families/{familyId}/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/FamilyNotification" },
+      "description": "Real-time family safety notifications"
+    },
+    "/families/{familyId}/locations/{locationId}": {
+      "schema": { "$ref": "#/entities/LocationUpdate" },
+      "description": "Explicitly shared location updates and place alerts"
+    },
+    "/families/{familyId}/app_usage/{usageId}": {
+      "schema": { "$ref": "#/entities/AppUsageEntry" },
+      "description": "Device app usage and inventory records"
+    }
+  }
+}

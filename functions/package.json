@@ -1,0 +1,26 @@
+{
+  "name": "guardian360-functions",
+  "description": "Guardian360 Firebase Cloud Functions (v2) for Parent-Child pairing, policy enforcement, approvals, telemetry, and FCM push dispatch",
+  "version": "1.0.0",
+  "scripts": {
+    "lint": "tsc --noEmit",
+    "build": "tsc",
+    "serve": "npm run build && firebase emulators:start --only functions",
+    "shell": "npm run build && firebase functions:shell",
+    "start": "npm run shell",
+    "deploy": "firebase deploy --only functions",
+    "test": "node --test test/backend.test.js"
+  },
+  "engines": {
+    "node": "20"
+  },
+  "main": "lib/index.js",
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^6.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  },
+  "private": true
+}

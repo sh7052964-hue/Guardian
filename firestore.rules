@@ -1,0 +1,724 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isStringBounded(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    function isBoundedStringList(arr, maxItems) {
+      return arr is list && arr.size() <= maxItems && (arr.size() == 0 || arr[0] is string);
+    }
+
+    function isValidTimestampsOnCreate(data) {
+      return data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidTimestampsOnUpdate(data, prev) {
+      return data.createdAt == prev.createdAt &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    // 1. /users/{userId}
+    function isValidUserAccount(data) {
+      return isStringBounded(data.userId, 1, 128) &&
+             isStringBounded(data.displayName, 1, 80) &&
+             data.role in ['PARENT', 'CHILD', 'UNSET'] &&
+             data.sessionVersion is int && data.sessionVersion >= 1 &&
+             (!('email' in data) || isStringBounded(data.email, 0, 120)) &&
+             (!('familyId' in data) || isStringBounded(data.familyId, 0, 128)) &&
+             (!('mobileNumber' in data) || isStringBounded(data.mobileNumber, 0, 32)) &&
+             (!('dateOfBirth' in data) || isStringBounded(data.dateOfBirth, 0, 24)) &&
+             (!('username' in data) || isStringBounded(data.username, 0, 48)) &&
+             (!('deviceName' in data) || isStringBounded(data.deviceName, 0, 80)) &&
+             (!('avatarUri' in data) || isStringBounded(data.avatarUri, 0, 500)) &&
+             (!('pinHash' in data) || isStringBounded(data.pinHash, 0, 128)) &&
+             (!('biometricEnabled' in data) || data.biometricEnabled is bool) &&
+             (!('twoFactorEnabled' in data) || data.twoFactorEnabled is bool) &&
+             (!('languageCode' in data) || data.languageCode in ['en', 'hi', 'as']);
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if false;
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().keys().hasAll(['userId', 'displayName', 'role', 'sessionVersion', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'displayName', 'email', 'role', 'familyId', 'mobileNumber',
+                         'dateOfBirth', 'username', 'deviceName', 'avatarUri', 'pinHash',
+                         'biometricEnabled', 'twoFactorEnabled', 'sessionVersion', 'languageCode',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidTimestampsOnCreate(incoming()) &&
+                       isValidUserAccount(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().userId == existing().userId &&
+                       isValidTimestampsOnUpdate(incoming(), existing()) &&
+                       isValidUserAccount(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'displayName', 'email', 'role', 'familyId', 'mobileNumber',
+                         'dateOfBirth', 'username', 'deviceName', 'avatarUri', 'pinHash',
+                         'biometricEnabled', 'twoFactorEnabled', 'sessionVersion', 'languageCode',
+                         'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+    }
+
+    // 2. /families/{familyId}
+    function isValidFamily(data) {
+      return isStringBounded(data.ownerUid, 1, 128) &&
+             isStringBounded(data.familyName, 1, 80) &&
+             isBoundedStringList(data.memberUids, 12) &&
+             isBoundedStringList(data.childUids, 10) &&
+             data.ownerUid in data.memberUids;
+    }
+
+    match /families/{familyId} {
+      allow get: if isSignedIn() && isValidId(familyId) && request.auth.uid in existing().memberUids;
+      allow list: if isSignedIn() && request.auth.uid in resource.data.memberUids;
+
+      allow create: if isSignedIn() &&
+                       isValidId(familyId) &&
+                       incoming().ownerUid == request.auth.uid &&
+                       incoming().keys().hasAll(['ownerUid', 'familyName', 'memberUids', 'childUids', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['ownerUid', 'familyName', 'memberUids', 'childUids', 'createdAt', 'updatedAt']) &&
+                       isValidTimestampsOnCreate(incoming()) &&
+                       isValidFamily(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(familyId) &&
+                       existing().ownerUid == request.auth.uid &&
+                       incoming().ownerUid == existing().ownerUid &&
+                       isValidTimestampsOnUpdate(incoming(), existing()) &&
+                       isValidFamily(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['familyName', 'memberUids', 'childUids', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(familyId) && existing().ownerUid == request.auth.uid;
+
+      // 4. /families/{familyId}/devices/{deviceId}
+      function isValidDevice(data) {
+        return isStringBounded(data.parentUid, 1, 128) &&
+               isStringBounded(data.childUid, 1, 128) &&
+               isBoundedStringList(data.memberUids, 12) &&
+               data.parentUid in data.memberUids &&
+               data.childUid in data.memberUids &&
+               isStringBounded(data.childName, 1, 80) &&
+               isStringBounded(data.deviceName, 1, 80) &&
+               data.managementLevel in [
+                 'STANDARD_SUPERVISION', 'FULLY_MANAGED', 'ENROLLMENT_PENDING',
+                 'ENROLLMENT_FAILED', 'DEVICE_OFFLINE', 'MANAGEMENT_LOST'
+               ] &&
+               isStringBounded(data.supervisionStatus, 1, 64) &&
+               data.deviceOnline is bool &&
+               data.batteryLevel is int && data.batteryLevel >= -1 && data.batteryLevel <= 100 &&
+               data.deviceLocked is bool &&
+               data.strictSupervision is bool &&
+               data.policyVersion is int && data.policyVersion >= 1 &&
+               (!('childEmail' in data) || isStringBounded(data.childEmail, 0, 120)) &&
+               (!('dateOfBirth' in data) || isStringBounded(data.dateOfBirth, 0, 24)) &&
+               (!('deviceModel' in data) || isStringBounded(data.deviceModel, 0, 80)) &&
+               (!('lastSeenEpochMs' in data) || data.lastSeenEpochMs is int) &&
+               (!('lastPolicySyncEpochMs' in data) || data.lastPolicySyncEpochMs is int) &&
+               (!('dailyScreenTimeMinutes' in data) || (data.dailyScreenTimeMinutes is int && data.dailyScreenTimeMinutes >= 0)) &&
+               (!('weeklyScreenTimeMinutes' in data) || (data.weeklyScreenTimeMinutes is int && data.weeklyScreenTimeMinutes >= 0));
+      }
+
+      match /devices/{deviceId} {
+        allow get: if isSignedIn() && isValidId(familyId) && isValidId(deviceId) && request.auth.uid in existing().memberUids;
+        allow list: if isSignedIn() && isValidId(familyId) && request.auth.uid in resource.data.memberUids;
+
+        allow create: if isSignedIn() &&
+                         isValidId(familyId) && isValidId(deviceId) &&
+                         (incoming().parentUid == request.auth.uid || incoming().childUid == request.auth.uid) &&
+                         exists(/databases/$(database)/documents/families/$(familyId)) &&
+                         request.auth.uid in get(/databases/$(database)/documents/families/$(familyId)).data.memberUids &&
+                         incoming().keys().hasAll([
+                           'parentUid', 'childUid', 'memberUids', 'childName', 'deviceName',
+                           'managementLevel', 'supervisionStatus', 'deviceOnline', 'batteryLevel',
+                           'deviceLocked', 'strictSupervision', 'policyVersion', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'parentUid', 'childUid', 'memberUids', 'childName', 'childEmail', 'dateOfBirth',
+                           'deviceName', 'deviceModel', 'managementLevel', 'supervisionStatus',
+                           'deviceOnline', 'batteryLevel', 'lastSeenEpochMs', 'lastPolicySyncEpochMs',
+                           'dailyScreenTimeMinutes', 'weeklyScreenTimeMinutes', 'deviceLocked',
+                           'strictSupervision', 'policyVersion', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidTimestampsOnCreate(incoming()) &&
+                         isValidDevice(incoming());
+
+        allow update: if isSignedIn() &&
+                         isValidId(familyId) && isValidId(deviceId) &&
+                         incoming().parentUid == existing().parentUid &&
+                         incoming().childUid == existing().childUid &&
+                         isValidTimestampsOnUpdate(incoming(), existing()) &&
+                         isValidDevice(incoming()) &&
+                         (
+                           (existing().parentUid == request.auth.uid &&
+                            incoming().diff(existing()).affectedKeys().hasOnly([
+                              'memberUids', 'childName', 'childEmail', 'dateOfBirth', 'deviceName',
+                              'deviceModel', 'managementLevel', 'supervisionStatus', 'deviceLocked',
+                              'strictSupervision', 'policyVersion', 'updatedAt'
+                            ])) ||
+                           (existing().childUid == request.auth.uid &&
+                            incoming().diff(existing()).affectedKeys().hasOnly([
+                              'deviceName', 'deviceModel', 'supervisionStatus',
+                              'deviceOnline', 'batteryLevel', 'lastSeenEpochMs', 'lastPolicySyncEpochMs',
+                              'dailyScreenTimeMinutes', 'weeklyScreenTimeMinutes', 'updatedAt'
+                            ]))
+                         );
+
+        allow delete: if isSignedIn() && isValidId(familyId) && isValidId(deviceId) && existing().parentUid == request.auth.uid;
+      }
+
+      // 5. /families/{familyId}/policies/{childUid}
+      function isValidPolicy(data) {
+        return isStringBounded(data.parentUid, 1, 128) &&
+               isStringBounded(data.childUid, 1, 128) &&
+               isBoundedStringList(data.memberUids, 12) &&
+               data.parentUid in data.memberUids &&
+               data.childUid in data.memberUids &&
+               data.policyVersion is int && data.policyVersion >= 1 &&
+               data.dailyLimitMinutes is int && data.dailyLimitMinutes >= 0 && data.dailyLimitMinutes <= 1440 &&
+               data.maxAgeRating in ['AGE_3', 'AGE_7', 'AGE_12', 'AGE_16', 'AGE_18'] &&
+               data.youtubeMode in ['NORMAL', 'SHORTS_RESTRICTION', 'STRICT_SHORTS_WEB_BLOCKING'] &&
+               data.lastActionState in ['PENDING', 'PROCESSING', 'APPLIED', 'FAILED', 'DEVICE_OFFLINE', 'UNSUPPORTED', 'REQUIRES_ENROLLMENT'] &&
+               (!('bedtimeStart' in data) || isStringBounded(data.bedtimeStart, 0, 10)) &&
+               (!('bedtimeEnd' in data) || isStringBounded(data.bedtimeEnd, 0, 10)) &&
+               (!('schoolTimeStart' in data) || isStringBounded(data.schoolTimeStart, 0, 10)) &&
+               (!('schoolTimeEnd' in data) || isStringBounded(data.schoolTimeEnd, 0, 10)) &&
+               (!('downtimeEnabled' in data) || data.downtimeEnabled is bool) &&
+               (!('emergencyBypassEnabled' in data) || data.emergencyBypassEnabled is bool) &&
+               (!('bonusMinutesToday' in data) || (data.bonusMinutesToday is int && data.bonusMinutesToday >= 0)) &&
+               (!('youtubeDailyLimitMinutes' in data) || (data.youtubeDailyLimitMinutes is int && data.youtubeDailyLimitMinutes >= 0)) &&
+               (!('whatsappDailyLimitMinutes' in data) || (data.whatsappDailyLimitMinutes is int && data.whatsappDailyLimitMinutes >= 0)) &&
+               (!('whatsappMetaAiWebRestricted' in data) || data.whatsappMetaAiWebRestricted is bool) &&
+               (!('safeSearchEnabled' in data) || data.safeSearchEnabled is bool) &&
+               (!('explicitContentFilterEnabled' in data) || data.explicitContentFilterEnabled is bool) &&
+               (!('dnsFilteringEnabled' in data) || data.dnsFilteringEnabled is bool) &&
+               (!('playStoreApprovalRequired' in data) || data.playStoreApprovalRequired is bool) &&
+               (!('iapRestricted' in data) || data.iapRestricted is bool) &&
+               (!('paidAppsRestricted' in data) || data.paidAppsRestricted is bool) &&
+               (!('unknownSourcesBlocked' in data) || data.unknownSourcesBlocked is bool) &&
+               (!('uninstallBlocked' in data) || data.uninstallBlocked is bool) &&
+               (!('usbDebuggingBlocked' in data) || data.usbDebuggingBlocked is bool) &&
+               (!('blockedCategories' in data) || isBoundedStringList(data.blockedCategories, 30)) &&
+               (!('blockedPackages' in data) || isBoundedStringList(data.blockedPackages, 150)) &&
+               (!('allowedPackages' in data) || isBoundedStringList(data.allowedPackages, 150)) &&
+               (!('blockedDomains' in data) || isBoundedStringList(data.blockedDomains, 150)) &&
+               (!('allowedDomains' in data) || isBoundedStringList(data.allowedDomains, 150)) &&
+               (!('homeLat' in data) || data.homeLat is number) &&
+               (!('homeLng' in data) || data.homeLng is number) &&
+               (!('homeRadiusMeters' in data) || data.homeRadiusMeters is int) &&
+               (!('schoolLat' in data) || data.schoolLat is number) &&
+               (!('schoolLng' in data) || data.schoolLng is number) &&
+               (!('schoolRadiusMeters' in data) || data.schoolRadiusMeters is int) &&
+               (!('locationSharingEnabled' in data) || data.locationSharingEnabled is bool) &&
+               (!('retentionDays' in data) || (data.retentionDays is int && data.retentionDays >= 1 && data.retentionDays <= 365));
+      }
+
+      match /policies/{childUid} {
+        allow get: if isSignedIn() && isValidId(familyId) && isValidId(childUid) && request.auth.uid in existing().memberUids;
+        allow list: if isSignedIn() && isValidId(familyId) && request.auth.uid in resource.data.memberUids;
+
+        allow create: if isSignedIn() &&
+                         isValidId(familyId) && isValidId(childUid) &&
+                         incoming().parentUid == request.auth.uid &&
+                         incoming().childUid == childUid &&
+                         exists(/databases/$(database)/documents/families/$(familyId)) &&
+                         get(/databases/$(database)/documents/families/$(familyId)).data.ownerUid == request.auth.uid &&
+                         incoming().keys().hasAll([
+                           'parentUid', 'childUid', 'memberUids', 'policyVersion',
+                           'dailyLimitMinutes', 'maxAgeRating', 'youtubeMode', 'lastActionState',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'parentUid', 'childUid', 'memberUids', 'policyVersion', 'dailyLimitMinutes',
+                           'bedtimeStart', 'bedtimeEnd', 'schoolTimeStart', 'schoolTimeEnd',
+                           'downtimeEnabled', 'emergencyBypassEnabled', 'bonusMinutesToday',
+                           'maxAgeRating', 'youtubeMode', 'youtubeDailyLimitMinutes',
+                           'whatsappDailyLimitMinutes', 'whatsappMetaAiWebRestricted',
+                           'safeSearchEnabled', 'explicitContentFilterEnabled', 'dnsFilteringEnabled',
+                           'playStoreApprovalRequired', 'iapRestricted', 'paidAppsRestricted',
+                           'unknownSourcesBlocked', 'uninstallBlocked', 'usbDebuggingBlocked',
+                           'blockedCategories', 'blockedPackages', 'allowedPackages',
+                           'blockedDomains', 'allowedDomains', 'homeLat', 'homeLng', 'homeRadiusMeters',
+                           'schoolLat', 'schoolLng', 'schoolRadiusMeters', 'locationSharingEnabled',
+                           'retentionDays', 'lastActionState', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidTimestampsOnCreate(incoming()) &&
+                         isValidPolicy(incoming());
+
+        allow update: if isSignedIn() &&
+                         isValidId(familyId) && isValidId(childUid) &&
+                         incoming().parentUid == existing().parentUid &&
+                         incoming().childUid == existing().childUid &&
+                         isValidTimestampsOnUpdate(incoming(), existing()) &&
+                         isValidPolicy(incoming()) &&
+                         (
+                           existing().parentUid == request.auth.uid ||
+                           (existing().childUid == request.auth.uid &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['lastActionState', 'updatedAt']))
+                         );
+
+        allow delete: if isSignedIn() && isValidId(familyId) && isValidId(childUid) && existing().parentUid == request.auth.uid;
+      }
+
+      // 6. /families/{familyId}/approvals/{requestId}
+      function isValidApproval(data) {
+        return isStringBounded(data.parentUid, 1, 128) &&
+               isStringBounded(data.childUid, 1, 128) &&
+               isBoundedStringList(data.memberUids, 12) &&
+               data.parentUid in data.memberUids &&
+               data.childUid in data.memberUids &&
+               isStringBounded(data.childName, 1, 80) &&
+               data.requestType in [
+                 'APP_INSTALL', 'RESTRICTED_APP', 'EXTRA_TIME', 'TEMPORARY_UNLOCK',
+                 'WEBSITE_ACCESS', 'CATEGORY_EXCEPTION', 'PERMISSION_CHANGE'
+               ] &&
+               data.status in ['PENDING', 'APPROVED', 'REJECTED', 'EXPIRED'] &&
+               (!('targetPackage' in data) || isStringBounded(data.targetPackage, 0, 160)) &&
+               (!('targetLabel' in data) || isStringBounded(data.targetLabel, 0, 120)) &&
+               (!('targetDomain' in data) || isStringBounded(data.targetDomain, 0, 200)) &&
+               (!('requestedMinutes' in data) || (data.requestedMinutes is int && data.requestedMinutes >= 0 && data.requestedMinutes <= 1440)) &&
+               (!('reason' in data) || isStringBounded(data.reason, 0, 300)) &&
+               (!('expiresAtEpochMs' in data) || data.expiresAtEpochMs is int) &&
+               (!('decidedByUid' in data) || isStringBounded(data.decidedByUid, 0, 128));
+      }
+
+      match /approvals/{requestId} {
+        allow get: if isSignedIn() && isValidId(familyId) && isValidId(requestId) && request.auth.uid in existing().memberUids;
+        allow list: if isSignedIn() && isValidId(familyId) && request.auth.uid in resource.data.memberUids;
+
+        allow create: if isSignedIn() &&
+                         isValidId(familyId) && isValidId(requestId) &&
+                         incoming().childUid == request.auth.uid &&
+                         incoming().status == 'PENDING' &&
+                         exists(/databases/$(database)/documents/families/$(familyId)) &&
+                         request.auth.uid in get(/databases/$(database)/documents/families/$(familyId)).data.memberUids &&
+                         incoming().keys().hasAll([
+                           'parentUid', 'childUid', 'memberUids', 'childName',
+                           'requestType', 'status', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'parentUid', 'childUid', 'memberUids', 'childName', 'requestType',
+                           'targetPackage', 'targetLabel', 'targetDomain', 'requestedMinutes',
+                           'reason', 'status', 'expiresAtEpochMs', 'decidedByUid', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidTimestampsOnCreate(incoming()) &&
+                         isValidApproval(incoming());
+
+        allow update: if isSignedIn() &&
+                         isValidId(familyId) && isValidId(requestId) &&
+                         existing().parentUid == request.auth.uid &&
+                         existing().status == 'PENDING' &&
+                         incoming().parentUid == existing().parentUid &&
+                         incoming().childUid == existing().childUid &&
+                         incoming().status in ['APPROVED', 'REJECTED', 'EXPIRED'] &&
+                         incoming().decidedByUid == request.auth.uid &&
+                         isValidTimestampsOnUpdate(incoming(), existing()) &&
+                         isValidApproval(incoming()) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'expiresAtEpochMs', 'decidedByUid', 'updatedAt']);
+
+        allow delete: if isSignedIn() && isValidId(familyId) && isValidId(requestId) && existing().parentUid == request.auth.uid;
+      }
+
+      // 7. /families/{familyId}/security_events/{eventId}
+      function isValidSecurityEvent(data) {
+        return isStringBounded(data.parentUid, 1, 128) &&
+               isStringBounded(data.childUid, 1, 128) &&
+               isBoundedStringList(data.memberUids, 12) &&
+               data.parentUid in data.memberUids &&
+               data.childUid in data.memberUids &&
+               isStringBounded(data.eventType, 1, 64) &&
+               data.severity in ['INFO', 'WARNING', 'CRITICAL'] &&
+               isStringBounded(data.title, 1, 120) &&
+               data.acknowledged is bool &&
+               (!('details' in data) || isStringBounded(data.details, 0, 400)) &&
+               (!('packageName' in data) || isStringBounded(data.packageName, 0, 160));
+      }
+
+      match /security_events/{eventId} {
+        allow get: if isSignedIn() && isValidId(familyId) && isValidId(eventId) && request.auth.uid in existing().memberUids;
+        allow list: if isSignedIn() && isValidId(familyId) && request.auth.uid in resource.data.memberUids;
+
+        allow create: if isSignedIn() &&
+                         isValidId(familyId) && isValidId(eventId) &&
+                         request.auth.uid in incoming().memberUids &&
+                         exists(/databases/$(database)/documents/families/$(familyId)) &&
+                         request.auth.uid in get(/databases/$(database)/documents/families/$(familyId)).data.memberUids &&
+                         incoming().keys().hasAll([
+                           'parentUid', 'childUid', 'memberUids', 'eventType', 'severity',
+                           'title', 'acknowledged', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'parentUid', 'childUid', 'memberUids', 'eventType', 'severity',
+                           'title', 'details', 'packageName', 'acknowledged', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidTimestampsOnCreate(incoming()) &&
+                         isValidSecurityEvent(incoming());
+
+        allow update: if isSignedIn() &&
+                         isValidId(familyId) && isValidId(eventId) &&
+                         existing().parentUid == request.auth.uid &&
+                         incoming().parentUid == existing().parentUid &&
+                         incoming().childUid == existing().childUid &&
+                         isValidTimestampsOnUpdate(incoming(), existing()) &&
+                         isValidSecurityEvent(incoming()) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['acknowledged', 'updatedAt']);
+
+        allow delete: if isSignedIn() && isValidId(familyId) && isValidId(eventId) && existing().parentUid == request.auth.uid;
+      }
+
+      // 8. /families/{familyId}/notifications/{notificationId}
+      function isValidFamilyNotification(data) {
+        return isStringBounded(data.parentUid, 1, 128) &&
+               isStringBounded(data.childUid, 1, 128) &&
+               isBoundedStringList(data.memberUids, 12) &&
+               data.parentUid in data.memberUids &&
+               data.childUid in data.memberUids &&
+               isStringBounded(data.recipientUid, 1, 128) &&
+               isStringBounded(data.category, 1, 64) &&
+               isStringBounded(data.title, 1, 120) &&
+               isStringBounded(data.body, 1, 300) &&
+               data.readFlag is bool;
+      }
+
+      match /notifications/{notificationId} {
+        allow get: if isSignedIn() && isValidId(familyId) && isValidId(notificationId) && request.auth.uid in existing().memberUids;
+        allow list: if isSignedIn() && isValidId(familyId) && request.auth.uid in resource.data.memberUids;
+
+        allow create: if isSignedIn() &&
+                         isValidId(familyId) && isValidId(notificationId) &&
+                         request.auth.uid in incoming().memberUids &&
+                         exists(/databases/$(database)/documents/families/$(familyId)) &&
+                         request.auth.uid in get(/databases/$(database)/documents/families/$(familyId)).data.memberUids &&
+                         incoming().keys().hasAll([
+                           'parentUid', 'childUid', 'memberUids', 'recipientUid',
+                           'category', 'title', 'body', 'readFlag', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'parentUid', 'childUid', 'memberUids', 'recipientUid',
+                           'category', 'title', 'body', 'readFlag', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidTimestampsOnCreate(incoming()) &&
+                         isValidFamilyNotification(incoming());
+
+        allow update: if isSignedIn() &&
+                         isValidId(familyId) && isValidId(notificationId) &&
+                         (existing().recipientUid == request.auth.uid || existing().parentUid == request.auth.uid) &&
+                         incoming().parentUid == existing().parentUid &&
+                         incoming().childUid == existing().childUid &&
+                         isValidTimestampsOnUpdate(incoming(), existing()) &&
+                         isValidFamilyNotification(incoming()) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['readFlag', 'updatedAt']);
+
+        allow delete: if isSignedIn() && isValidId(familyId) && isValidId(notificationId) && existing().parentUid == request.auth.uid;
+      }
+
+      // 9. /families/{familyId}/locations/{locationId}
+      function isValidLocationUpdate(data) {
+        return isStringBounded(data.parentUid, 1, 128) &&
+               isStringBounded(data.childUid, 1, 128) &&
+               isBoundedStringList(data.memberUids, 12) &&
+               data.parentUid in data.memberUids &&
+               data.childUid in data.memberUids &&
+               data.latitude is number && data.latitude >= -90 && data.latitude <= 90 &&
+               data.longitude is number && data.longitude >= -180 && data.longitude <= 180 &&
+               data.sharingActive is bool &&
+               data.capturedAtEpochMs is int && data.capturedAtEpochMs > 0 &&
+               (!('accuracyMeters' in data) || data.accuracyMeters is number) &&
+               (!('placeLabel' in data) || isStringBounded(data.placeLabel, 0, 80)) &&
+               (!('eventKind' in data) || data.eventKind in ['UPDATE', 'ARRIVAL', 'DEPARTURE']);
+      }
+
+      match /locations/{locationId} {
+        allow get: if isSignedIn() && isValidId(familyId) && isValidId(locationId) && request.auth.uid in existing().memberUids;
+        allow list: if isSignedIn() && isValidId(familyId) && request.auth.uid in resource.data.memberUids;
+
+        allow create: if isSignedIn() &&
+                         isValidId(familyId) && isValidId(locationId) &&
+                         incoming().childUid == request.auth.uid &&
+                         exists(/databases/$(database)/documents/families/$(familyId)) &&
+                         request.auth.uid in get(/databases/$(database)/documents/families/$(familyId)).data.memberUids &&
+                         incoming().keys().hasAll([
+                           'parentUid', 'childUid', 'memberUids', 'latitude', 'longitude',
+                           'sharingActive', 'capturedAtEpochMs', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'parentUid', 'childUid', 'memberUids', 'latitude', 'longitude',
+                           'accuracyMeters', 'placeLabel', 'eventKind', 'sharingActive',
+                           'capturedAtEpochMs', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidTimestampsOnCreate(incoming()) &&
+                         isValidLocationUpdate(incoming());
+
+        allow update: if false;
+        allow delete: if isSignedIn() && isValidId(familyId) && isValidId(locationId) && existing().parentUid == request.auth.uid;
+      }
+
+      // 10. /families/{familyId}/app_usage/{usageId}
+      function isValidAppUsageEntry(data) {
+        return isStringBounded(data.parentUid, 1, 128) &&
+               isStringBounded(data.childUid, 1, 128) &&
+               isBoundedStringList(data.memberUids, 12) &&
+               data.parentUid in data.memberUids &&
+               data.childUid in data.memberUids &&
+               isStringBounded(data.packageName, 1, 160) &&
+               isStringBounded(data.appLabel, 1, 120) &&
+               isStringBounded(data.category, 1, 64) &&
+               data.minutesToday is int && data.minutesToday >= 0 &&
+               data.minutesWeek is int && data.minutesWeek >= 0 &&
+               data.blocked is bool &&
+               data.exceptionAllowed is bool &&
+               (!('ageRating' in data) || isStringBounded(data.ageRating, 0, 20));
+      }
+
+      match /app_usage/{usageId} {
+        allow get: if isSignedIn() && isValidId(familyId) && isValidId(usageId) && request.auth.uid in existing().memberUids;
+        allow list: if isSignedIn() && isValidId(familyId) && request.auth.uid in resource.data.memberUids;
+
+        allow create: if isSignedIn() &&
+                         isValidId(familyId) && isValidId(usageId) &&
+                         (incoming().childUid == request.auth.uid || incoming().parentUid == request.auth.uid) &&
+                         exists(/databases/$(database)/documents/families/$(familyId)) &&
+                         request.auth.uid in get(/databases/$(database)/documents/families/$(familyId)).data.memberUids &&
+                         incoming().keys().hasAll([
+                           'parentUid', 'childUid', 'memberUids', 'packageName', 'appLabel',
+                           'category', 'minutesToday', 'minutesWeek', 'blocked', 'exceptionAllowed',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'parentUid', 'childUid', 'memberUids', 'packageName', 'appLabel',
+                           'category', 'ageRating', 'minutesToday', 'minutesWeek', 'blocked',
+                           'exceptionAllowed', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidTimestampsOnCreate(incoming()) &&
+                         isValidAppUsageEntry(incoming());
+
+        allow update: if isSignedIn() &&
+                         isValidId(familyId) && isValidId(usageId) &&
+                         request.auth.uid in existing().memberUids &&
+                         incoming().parentUid == existing().parentUid &&
+                         incoming().childUid == existing().childUid &&
+                         isValidTimestampsOnUpdate(incoming(), existing()) &&
+                         isValidAppUsageEntry(incoming()) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'appLabel', 'category', 'ageRating', 'minutesToday', 'minutesWeek',
+                           'blocked', 'exceptionAllowed', 'updatedAt'
+                         ]);
+
+        allow delete: if isSignedIn() && isValidId(familyId) && isValidId(usageId) && existing().parentUid == request.auth.uid;
+      }
+
+      // 11. /families/{familyId}/audit_logs/{logId} (Immutable append-only)
+      function isValidAuditLog(data) {
+        return isStringBounded(data.parentUid, 1, 128) &&
+               isStringBounded(data.actorUid, 1, 128) &&
+               isStringBounded(data.action, 1, 80) &&
+               isStringBounded(data.targetPath, 1, 200) &&
+               (!('childUid' in data) || isStringBounded(data.childUid, 0, 128)) &&
+               (!('details' in data) || isStringBounded(data.details, 0, 400));
+      }
+
+      match /audit_logs/{logId} {
+        allow get: if isSignedIn() && isValidId(familyId) && isValidId(logId) && existing().parentUid == request.auth.uid;
+        allow list: if isSignedIn() && isValidId(familyId) && resource.data.parentUid == request.auth.uid;
+
+        allow create: if isSignedIn() &&
+                         isValidId(familyId) && isValidId(logId) &&
+                         incoming().parentUid == request.auth.uid &&
+                         incoming().actorUid == request.auth.uid &&
+                         exists(/databases/$(database)/documents/families/$(familyId)) &&
+                         get(/databases/$(database)/documents/families/$(familyId)).data.ownerUid == request.auth.uid &&
+                         incoming().keys().hasAll([
+                           'parentUid', 'actorUid', 'action', 'targetPath', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'parentUid', 'actorUid', 'childUid', 'action', 'targetPath', 'details', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidTimestampsOnCreate(incoming()) &&
+                         isValidAuditLog(incoming());
+
+        allow update, delete: if false;
+      }
+
+      // 12. /families/{familyId}/device_heartbeats/{heartbeatId} (Immutable append-only telemetry)
+      function isValidHeartbeat(data) {
+        return isStringBounded(data.parentUid, 1, 128) &&
+               isStringBounded(data.childUid, 1, 128) &&
+               isBoundedStringList(data.memberUids, 12) &&
+               data.parentUid in data.memberUids &&
+               data.childUid in data.memberUids &&
+               data.online is bool &&
+               data.batteryLevel is int && data.batteryLevel >= -1 && data.batteryLevel <= 100 &&
+               data.recordedAtEpochMs is int && data.recordedAtEpochMs > 0;
+      }
+
+      match /device_heartbeats/{heartbeatId} {
+        allow get: if isSignedIn() && isValidId(familyId) && isValidId(heartbeatId) && request.auth.uid in existing().memberUids;
+        allow list: if isSignedIn() && isValidId(familyId) && request.auth.uid in resource.data.memberUids;
+
+        allow create: if isSignedIn() &&
+                         isValidId(familyId) && isValidId(heartbeatId) &&
+                         incoming().childUid == request.auth.uid &&
+                         exists(/databases/$(database)/documents/families/$(familyId)) &&
+                         request.auth.uid in get(/databases/$(database)/documents/families/$(familyId)).data.memberUids &&
+                         incoming().keys().hasAll([
+                           'parentUid', 'childUid', 'memberUids', 'online', 'batteryLevel',
+                           'recordedAtEpochMs', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'parentUid', 'childUid', 'memberUids', 'online', 'batteryLevel',
+                           'recordedAtEpochMs', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidTimestampsOnCreate(incoming()) &&
+                         isValidHeartbeat(incoming());
+
+        allow update, delete: if false;
+      }
+
+      // 13. /families/{familyId}/policy_versions/{versionId} (Immutable version history)
+      function isValidPolicyVersion(data) {
+        return isStringBounded(data.parentUid, 1, 128) &&
+               isStringBounded(data.childUid, 1, 128) &&
+               isBoundedStringList(data.memberUids, 12) &&
+               data.parentUid in data.memberUids &&
+               data.childUid in data.memberUids &&
+               data.policyVersion is int && data.policyVersion >= 1 &&
+               isStringBounded(data.executionStatus, 1, 64) &&
+               (!('summary' in data) || isStringBounded(data.summary, 0, 300));
+      }
+
+      match /policy_versions/{versionId} {
+        allow get: if isSignedIn() && isValidId(familyId) && isValidId(versionId) && request.auth.uid in existing().memberUids;
+        allow list: if isSignedIn() && isValidId(familyId) && request.auth.uid in resource.data.memberUids;
+
+        allow create: if isSignedIn() &&
+                         isValidId(familyId) && isValidId(versionId) &&
+                         incoming().parentUid == request.auth.uid &&
+                         exists(/databases/$(database)/documents/families/$(familyId)) &&
+                         get(/databases/$(database)/documents/families/$(familyId)).data.ownerUid == request.auth.uid &&
+                         incoming().keys().hasAll([
+                           'parentUid', 'childUid', 'memberUids', 'policyVersion', 'executionStatus',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'parentUid', 'childUid', 'memberUids', 'policyVersion', 'executionStatus',
+                           'summary', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidTimestampsOnCreate(incoming()) &&
+                         isValidPolicyVersion(incoming());
+
+        allow update, delete: if false;
+      }
+    }
+
+    // 3. /pairing_sessions/{sessionId}
+    function isValidPairingSession(data) {
+      return isStringBounded(data.familyId, 1, 128) &&
+             isStringBounded(data.parentUid, 1, 128) &&
+             (!('pairingCode' in data) || isStringBounded(data.pairingCode, 4, 24)) &&
+             (!('pairingCodeHash' in data) || isStringBounded(data.pairingCodeHash, 32, 128)) &&
+             (!('pairingCodeHint' in data) || isStringBounded(data.pairingCodeHint, 2, 24)) &&
+             (('pairingCode' in data) || ('pairingCodeHash' in data)) &&
+             data.status in ['PENDING', 'REQUESTED', 'APPROVED', 'REJECTED', 'EXPIRED'] &&
+             data.expiresAtEpochMs is int && data.expiresAtEpochMs > 0 &&
+             data.attemptCount is int && data.attemptCount >= 0 && data.attemptCount <= 10 &&
+             data.consumed is bool &&
+             (!('childUid' in data) || isStringBounded(data.childUid, 0, 128)) &&
+             (!('childName' in data) || isStringBounded(data.childName, 0, 80)) &&
+             (!('childDeviceName' in data) || isStringBounded(data.childDeviceName, 0, 80)) &&
+             (!('deviceModel' in data) || isStringBounded(data.deviceModel, 0, 80));
+    }
+
+    match /pairing_sessions/{sessionId} {
+      // Allow parent, paired child, or signed-in holder of the exact one-time session ID while PENDING
+      allow get: if isSignedIn() && isValidId(sessionId) && (
+        existing().parentUid == request.auth.uid ||
+        ('childUid' in existing() && existing().childUid == request.auth.uid) ||
+        (existing().status == 'PENDING' && existing().consumed == false)
+      );
+      allow list: if isSignedIn() && resource.data.parentUid == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+                       isValidId(sessionId) &&
+                       incoming().parentUid == request.auth.uid &&
+                       incoming().status == 'PENDING' &&
+                       incoming().consumed == false &&
+                       exists(/databases/$(database)/documents/families/$(incoming().familyId)) &&
+                       get(/databases/$(database)/documents/families/$(incoming().familyId)).data.ownerUid == request.auth.uid &&
+                       incoming().keys().hasAll([
+                         'familyId', 'parentUid', 'status',
+                         'expiresAtEpochMs', 'attemptCount', 'consumed', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'familyId', 'parentUid', 'pairingCode', 'pairingCodeHash', 'pairingCodeHint',
+                         'status', 'childUid', 'childName', 'childDeviceName', 'deviceModel',
+                         'expiresAtEpochMs', 'attemptCount', 'consumed', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidTimestampsOnCreate(incoming()) &&
+                       isValidPairingSession(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(sessionId) &&
+                       incoming().familyId == existing().familyId &&
+                       incoming().parentUid == existing().parentUid &&
+                       (!('pairingCode' in existing()) || incoming().pairingCode == existing().pairingCode) &&
+                       (!('pairingCodeHash' in existing()) || incoming().pairingCodeHash == existing().pairingCodeHash) &&
+                       isValidTimestampsOnUpdate(incoming(), existing()) &&
+                       isValidPairingSession(incoming()) &&
+                       (
+                         // Child claims pending session -> REQUESTED
+                         (existing().status == 'PENDING' &&
+                          existing().consumed == false &&
+                          incoming().status == 'REQUESTED' &&
+                          incoming().consumed == false &&
+                          incoming().childUid == request.auth.uid &&
+                          incoming().diff(existing()).affectedKeys().hasOnly([
+                            'status', 'childUid', 'childName', 'childDeviceName', 'deviceModel', 'attemptCount', 'updatedAt'
+                          ])) ||
+                         // Parent approves, rejects, or expires -> terminal
+                         (existing().parentUid == request.auth.uid &&
+                          existing().status in ['PENDING', 'REQUESTED'] &&
+                          incoming().status in ['APPROVED', 'REJECTED', 'EXPIRED'] &&
+                          incoming().consumed == true &&
+                          incoming().diff(existing()).affectedKeys().hasOnly([
+                            'status', 'consumed', 'updatedAt'
+                          ]))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(sessionId) && existing().parentUid == request.auth.uid;
+    }
+  }
+}

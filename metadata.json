@@ -1,0 +1,6 @@
+{
+  "name": "Guardian360",
+  "description": "Family safety, parental supervision, screen time, app category filtering, and Android Enterprise device policy controller.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
